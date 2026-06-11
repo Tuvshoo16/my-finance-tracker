@@ -1,4 +1,3 @@
-// supabase холболтоо импортлож оруулж ирнэ
 import { supabase } from './supabase.js'
 
 const transactionForm = document.getElementById('transaction-form');
@@ -8,8 +7,10 @@ const txAmountInput = document.getElementById('tx-amount');
 const txDateInput = document.getElementById('tx-date');
 const txDescInput = document.getElementById('tx-desc');
 
-document.addEventListener('DOMContentLoaded', async () => {
+let globalTransactions = [];
+let globalBudgets = [];
 
+document.addEventListener('DOMContentLoaded', async () => {
     const { data: { user }, error } = await supabase.auth.getUser();
 
     if (error || !user) {
@@ -19,9 +20,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     document.getElementById('user-email').textContent = user.email;
 
+    // Өгөгдлүүдийг татах
     await fetchTransactions();
     await fetchBudgets();
-    if (typeof fetchBudgets === 'function') fetchBudgets();
 });
 
 transactionForm.addEventListener('submit', async (e) => {
@@ -48,14 +49,16 @@ transactionForm.addEventListener('submit', async (e) => {
             .eq('category', category)
             .eq('month_year', currentMonthYear)
             .maybeSingle();
+
         if (budgetData) {
             const limitAmount = budgetData.limit_amount;
             const { data: pastExpenses } = await supabase
                 .from('transactions')
-                .select('amount')
+                .select('amount, date') 
                 .eq('user_id', user.id)
                 .eq('type', 'expense')
                 .eq('category', category);
+
             let totalPastExpense = 0;
             if (pastExpenses) {
                 pastExpenses.forEach(tx => {
@@ -64,11 +67,10 @@ transactionForm.addEventListener('submit', async (e) => {
                     }
                 });
             }
-
             if (totalPastExpense + amount > limitAmount) {
                 const currentTotal = totalPastExpense + amount;
                 const proceed = confirm(
-                    `АНХААРУУЛГА!\n\nТаны ${currentMonthYear} сарын "${category}" ангиллын төсвийн хязгаар: ${limitAmount.toLocaleString()} ₮\nОдоогийн нийт зарцуулалт: ${currentTotal.toLocaleString()} ₮ болох гэж байна.\n\nТөсөв хэтрүүлж гүйлгээг үргэлжлүүлэх үү?`
+                    `⚠️ АНХААРУУЛГА! ТӨСӨВ ХЭТРЭХ ГЭЖ БАЙНА.\n\nТаны ${currentMonthYear} сарын "${category}" ангиллын төсвийн хязгаар: ${limitAmount.toLocaleString()} ₮\nОдоогийн нийт зарцуулалт: ${currentTotal.toLocaleString()} ₮ болох гэж байна.\n\nТөсөв хэтрүүлж гүйлгээг үргэлжлүүлэх үү?`
                 );
                 
                 if (!proceed) {
@@ -77,8 +79,7 @@ transactionForm.addEventListener('submit', async (e) => {
             }
         }
     }
-
-    const { data, error } = await supabase
+    const { error } = await supabase
         .from('transactions')
         .insert([
             {
@@ -89,8 +90,7 @@ transactionForm.addEventListener('submit', async (e) => {
                 description: description,
                 date: date
             }
-        ])
-        .select();
+        ]);
 
     if (error) {
         alert("Гүйлгээг хадгалахад алдаа гарлаа: " + error.message);
@@ -99,12 +99,13 @@ transactionForm.addEventListener('submit', async (e) => {
         alert("Гүйлгээ амжилттай бүртгэгдлээ!");
         transactionForm.reset();
     }
-    fetchTransactions();
+    await fetchTransactions();
 });
 
 async function fetchTransactions() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
+    
     const { data: transactions, error } = await supabase
         .from('transactions')
         .select('*')
@@ -115,6 +116,8 @@ async function fetchTransactions() {
         console.error("Гүйлгээ уншихад алдаа гарлаа:", error.message);
         return;
     }
+
+    globalTransactions = transactions;
 
     let totalIncome = 0;
     let totalExpense = 0;
@@ -135,6 +138,7 @@ async function fetchTransactions() {
     document.getElementById('total-expense').textContent = `${totalExpense.toLocaleString()} ₮`;
 
     renderTransactions(transactions);
+    checkAndRenderBadges();
 }
 
 function renderTransactions(transactions) {
@@ -181,10 +185,7 @@ function renderTransactions(transactions) {
 
 window.deleteTransaction = async function(id) {
     const confirmDelete = confirm("Та энэ гүйлгээг устгахдаа итгэлтэй байна уу?");
-    
-    if (!confirmDelete) {
-        return;
-    }
+    if (!confirmDelete) return;
 
     try {
         const { error } = await supabase
@@ -192,43 +193,32 @@ window.deleteTransaction = async function(id) {
             .delete()
             .eq('id', id);
 
-        if (error) {
-            throw error;
-        }
+        if (error) throw error;
 
         alert("Гүйлгээ амжилттай устгагдлаа.");
-        fetchTransactions();
+        await fetchTransactions();
 
     } catch (error) {
         alert("Гүйлгээ устгахад алдаа гарлаа: " + error.message);
-        console.error("Устгах үеийн алдаа:", error);
     }
 }
 
+// СИСТЕМЭЭС ГАРАХ
 const btnLogout = document.getElementById('btn-logout');
-
 btnLogout.addEventListener('click', async () => {
     const confirmLogout = confirm("Та системээс гарахдаа итгэлтэй байна уу?");
-    
-    if (!confirmLogout) {
-        return;
-    }
+    if (!confirmLogout) return;
 
     try {
         const { error } = await supabase.auth.signOut();
-
-        if (error) {
-            throw error;
-        }
+        if (error) throw error;
         window.location.href = 'index.html';
-
     } catch (error) {
         alert("Системээс гарахад алдаа гарлаа: " + error.message);
-        console.error("Logout алдаа:", error);
     }
 });
 
-
+// ТӨСӨВ ФОРМ ХАДГАЛАХ
 const budgetForm = document.getElementById('budget-form');
 const budgetCategoryInput = document.getElementById('budget-category');
 const budgetAmountInput = document.getElementById('budget-amount');
@@ -265,10 +255,9 @@ budgetForm.addEventListener('submit', async (e) => {
         const instance = bootstrap.Offcanvas.getInstance(document.getElementById('offcanvasBudget'));
         if (instance) instance.hide();
         
-        if (typeof fetchBudgets === 'function') fetchBudgets();
+        await fetchBudgets();
     }
 });
-
 
 async function fetchBudgets() {
     const { data: { user } } = await supabase.auth.getUser();
@@ -284,6 +273,8 @@ async function fetchBudgets() {
         console.error("Төсөв уншихад алдаа гарлаа:", error.message);
         return;
     }
+
+    globalBudgets = budgets;
 
     const budgetsContainer = document.getElementById('current-budgets-list');
     
@@ -313,4 +304,68 @@ async function fetchBudgets() {
     });
 
     budgetsContainer.innerHTML = htmlContent;
+    checkAndRenderBadges();
+}
+function checkAndRenderBadges() {
+    const badgesContainer = document.getElementById('badges-container');
+    if (!badgesContainer) return;
+    let totalIncome = 0;
+    let totalExpense = 0;
+    globalTransactions.forEach(tx => {
+        if (tx.type === 'income') totalIncome += tx.amount;
+        if (tx.type === 'expense') totalExpense += tx.amount;
+    });
+    const balance = totalIncome - totalExpense;
+    const badgeRules = [
+        {
+            name: "🌱 Шинэ Санхүүч",
+            desc: "Анхны гүйлгээгээ амжилттай бүртгэсэн.",
+            icon: "fa-star text-warning",
+            isEarned: globalTransactions.length >= 1
+        },
+        {
+            name: "🎯 Ухаалаг Төсөвлөгч",
+            desc: "2 болон түүнээс дээш төсөв тогтоосон.",
+            icon: "fa-bullseye text-danger",
+            isEarned: globalBudgets.length >= 2
+        },
+        {
+            name: "📉 Хэмнэгч Од",
+            desc: "Зарлага нь орлогоосоо бага байна.",
+            icon: "fa-arrow-trend-down text-success",
+            isEarned: totalExpense > 0 && totalExpense < totalIncome
+        },
+        {
+            name: "💰 Хуримтлуулагч Мастер",
+            desc: "Үлдэгдэл 1,000,000 ₮-өөс давсан.",
+            icon: "fa-piggy-bank text-info",
+            isEarned: balance >= 1000000
+        }
+    ];
+    let html = '';
+    badgeRules.forEach(badge => {
+        if (badge.isEarned) {
+            html += `
+                <div class="col-6 col-md-3">
+                    <div class="card text-center p-3 border-0 shadow-sm bg-white h-100 border-top border-4 border-success">
+                        <div class="fs-2 mb-2"><i class="fa-solid ${badge.icon}"></i></div>
+                        <h6 class="fw-bold text-dark mb-1 small">${badge.name}</h6>
+                        <p class="text-muted mb-0 style="font-size: 11px;">${badge.desc}</p>
+                    </div>
+                </div>
+            `;
+        } else {
+            html += `
+                <div class="col-6 col-md-3 opacity-50">
+                    <div class="card text-center p-3 border-0 shadow-sm bg-light h-100 border-top border-4 border-secondary">
+                        <div class="fs-2 mb-2 text-secondary"><i class="fa-solid fa-lock"></i></div>
+                        <h6 class="fw-bold text-muted mb-1 small">${badge.name}</h6>
+                        <p class="text-muted mb-0" style="font-size: 11px;">Түгжигдсэн</p>
+                    </div>
+                </div>
+            `;
+        }
+    });
+
+    badgesContainer.innerHTML = html;
 }
